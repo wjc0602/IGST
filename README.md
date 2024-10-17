@@ -26,15 +26,7 @@ pip install git+https://github.com/JittorRepos/jittor
 pip install git+https://github.com/JittorRepos/jtorch
 pip install git+https://github.com/JittorRepos/diffusers_jittor
 pip install git+https://github.com/JittorRepos/transformers_jittor
-```
 
-或者
-
-```bash
-pip install -r requirement.txt
-```
-### 2. 安装 JDiffusion
-```bash
 cd JDiffusion
 pip install -e .
 ```

@@ -1,42 +1,59 @@
-import jittor as jt
-import jittor.nn as nn
 import argparse
+import itertools
+import json
 import logging
 import math
 import os
-import itertools
-import json
 from pathlib import Path
-from safetensors.numpy import save_file
+
+import diffusers
+import jittor as jt
+import jittor.nn as nn
 import transformers
 from PIL import Image
 from PIL.ImageOps import exif_transpose
+from diffusers import DDPMScheduler
+from diffusers import DiffusionPipeline
+from diffusers.optimization import get_scheduler
 from jittor import transform
 from jittor.compatibility.optim import AdamW
 from jittor.compatibility.utils.data import Dataset, DataLoader
+from safetensors.numpy import save_file
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, CLIPTextModel
-from diffusers import DiffusionPipeline
-import diffusers
-from JDiffusion import (AutoencoderKL, UNet2DConditionModel,)
-from diffusers import DDPMScheduler
-from diffusers.optimization import get_scheduler
 
+from JDiffusion import (AutoencoderKL, UNet2DConditionModel, )
+
+# 固定随机种子，保证实验的一致性
 jt.flags.use_cuda = 1
 diffusers.training_utils.set_seed(1234)
 jt.misc.set_global_seed(1234, different_seed_for_mpi=False)
 
 def test_in_train(pipeline, prompt_json_path, img_save_dir,  instance_prompt, num_inference_steps):
+    """
+    在训练过程中对指定迭代次数的模型进行测试
+    Args:
+        pipeline: Difussion模型的执行流程
+        prompt_json_path: 用于生成指定内容的Prompt
+        img_save_dir: 保存图像的路径
+        instance_prompt: 指定风格的Prompt
+        num_inference_steps: 测试过程中推理的步数
+
+    Returns: None
+
+    """
+    # 读取记录Context的JSON文件
     with open(prompt_json_path, "r") as file:
         prompts = json.load(file)
+    # 遍历每一个Content的Prompt
     for id, prompt in prompts.items():
         prompt_new = f"A painting of a {prompt} in the style of {instance_prompt}"
         print(f"测试用的提示词：{prompt_new}")
-        image = pipeline(prompt_new, 
-                        num_inference_steps=num_inference_steps,
-                        height=args.resolution, 
-                        width=args.resolution, 
-                        guidance_scale=args.guidance_scale).images[0]
+        image = pipeline(prompt_new,
+                         num_inference_steps=num_inference_steps,
+                         height=args.resolution,
+                         width=args.resolution,
+                         guidance_scale=args.guidance_scale).images[0]
         os.makedirs(img_save_dir, exist_ok=True)
         image.save(f"{img_save_dir}/{prompt}.png")
 
@@ -112,7 +129,7 @@ class TokenEmbeddingsHandler:
         self.text_encoders = text_encoders
         self.tokenizers = tokenizers
         self.train_ids = None
-        self.inserting_toks  = None
+        self.inserting_toks = None
         self.embeddings_settings = {}
 
     def initialize_new_tokens(self, inserting_toks):
@@ -128,11 +145,11 @@ class TokenEmbeddingsHandler:
 
             self.train_ids = tokenizer.convert_tokens_to_ids(self.inserting_toks)
 
-            # random initialization of new tokens
+            # 随机初始化新的Token
             std_token_embedding = text_encoder.text_model.embeddings.token_embedding.weight.data.std()
             print(f"{idx} text encodedr's std_token_embedding: {std_token_embedding}")
             text_encoder.text_model.embeddings.token_embedding.weight.data[self.train_ids] = (
-                jt.randn(len(self.train_ids), text_encoder.text_model.config.hidden_size).to(device=self.device).to(dtype=self.dtype) * std_token_embedding
+                    jt.randn(len(self.train_ids), text_encoder.text_model.config.hidden_size).to(device=self.device).to(dtype=self.dtype) * std_token_embedding
             )
             self.embeddings_settings[f"original_embeddings_{idx}"] = text_encoder.text_model.embeddings.token_embedding.weight.data.clone()
             self.embeddings_settings[f"std_token_embedding_{idx}"] = std_token_embedding
@@ -145,19 +162,6 @@ class TokenEmbeddingsHandler:
 
             idx += 1
 
-    # copied from train_dreambooth_lora_sdxl_advanced.py
-    def save_embeddings(self, file_path: str):
-        assert self.train_ids is not None, "Initialize new tokens before saving embeddings."
-        tensors = {}
-        # text_encoder_0 - CLIP ViT-L/14, text_encoder_1 -  CLIP ViT-G/14 - TODO - change for sd
-        idx_to_text_encoder_name = {0: "clip_l", 1: "clip_g"}
-        for idx, text_encoder in enumerate(self.text_encoders):
-            assert text_encoder.text_model.embeddings.token_embedding.weight.data.shape[0] == len(self.tokenizers[0]), "Tokenizers should be the same."
-            new_token_embeddings = text_encoder.text_model.embeddings.token_embedding.weight.data[self.train_ids]
-            tensors[idx_to_text_encoder_name[idx]] = new_token_embeddings.numpy()
-        print(f"保存的位置：{file_path}")
-        save_file(tensors, file_path)
-
     @property
     def dtype(self):
         return self.text_encoders[0].dtype
@@ -168,6 +172,11 @@ class TokenEmbeddingsHandler:
 
     @jt.no_grad()
     def retract_embeddings(self):
+        """
+        重新构建embedding，只更新新插入的Token
+        Returns:
+
+        """
         for idx, text_encoder in enumerate(self.text_encoders):
             index_no_updates = self.embeddings_settings[f"index_no_updates_{idx}"]
             text_encoder.text_model.embeddings.token_embedding.weight.data[index_no_updates] = (
@@ -189,21 +198,21 @@ class TokenEmbeddingsHandler:
 
 class DreamBoothDataset(Dataset):
     def __init__(
-        self,
-        instance_data_root,
-        instance_prompt,
-        tokenizer,
-        train_text_encoder_ti, 
-        class_data_root=None,
-        class_prompt=None,
-        class_num=None,
-        size=512,
-        repeats=1,
-        center_crop=False,
-        encoder_hidden_states=None,
-        class_prompt_encoder_hidden_states=None,
-        token_abstraction_dict=None,  # token mapping for textual inversion
-        tokenizer_max_length=None,
+            self,
+            instance_data_root,
+            instance_prompt,
+            tokenizer,
+            train_text_encoder_ti,
+            class_data_root=None,
+            class_prompt=None,
+            class_num=None,
+            size=512,
+            repeats=1,
+            center_crop=False,
+            encoder_hidden_states=None,
+            class_prompt_encoder_hidden_states=None,
+            token_abstraction_dict=None,  # token mapping for textual inversion
+            tokenizer_max_length=None,
     ):
         self.size = size
         self.center_crop = center_crop
@@ -288,13 +297,13 @@ def collate_fn(examples, with_prior_preservation=False):
 def tokenize_prompt(tokenizer, prompt,  add_special_tokens=False):
     if add_special_tokens:
         text_inputs = tokenizer(
-                prompt,
-                padding="max_length",
-                max_length=tokenizer.model_max_length,
-                truncation=True,
-                add_special_tokens=add_special_tokens,
-                return_tensors="pt",
-            )
+            prompt,
+            padding="max_length",
+            max_length=tokenizer.model_max_length,
+            truncation=True,
+            add_special_tokens=add_special_tokens,
+            return_tensors="pt",
+        )
     else:
         text_inputs = tokenizer(
             prompt,
@@ -334,7 +343,7 @@ def main(args):
     text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision)
     vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision)
-    
+
     if args.train_text_encoder_ti:
         # we parse the provided token identifier (or identifiers) into a list. s.t. - "TOK" -> ["TOK"], "TOK,
         # TOK2" -> ["TOK", "TOK2"] etc.
@@ -369,7 +378,7 @@ def main(args):
     weight_dtype = jt.float32
     for name, param in unet.named_parameters():
         param.requires_grad = True
-        
+
     for name, param in unet.named_parameters():
         assert param.requires_grad == True, name
 
@@ -520,11 +529,11 @@ def main(args):
             # Get the text embedding for conditioning
             input_ids = batch["input_ids"]
             prompt_embeds_input = encode_prompt(
-                    text_encoder = text_encoder,
-                    tokenizers=None,
-                    prompt=None,
-                    text_input_ids_list=input_ids
-                )
+                text_encoder = text_encoder,
+                tokenizers=None,
+                prompt=None,
+                text_input_ids_list=input_ids
+            )
 
             if args.class_labels_conditioning == "timesteps":
                 class_labels = timesteps
@@ -550,7 +559,7 @@ def main(args):
                 target = noise_scheduler.get_velocity(model_input, noise, timesteps)
             else:
                 raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
-
+            # 判断是否使用 prior loss
             if args.with_prior_preservation:
                 model_pred, model_pred_prior = jt.chunk(model_pred, 2, dim=0)
                 target, target_prior = jt.chunk(target, 2, dim=0)
@@ -559,7 +568,7 @@ def main(args):
                 loss = loss + args.prior_loss_weight * prior_loss
             else:
                 loss = nn.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                    
+            # 反向传播
             loss.backward()
 
             optimizer_unet.step()
@@ -594,12 +603,12 @@ def main(args):
                     text_encoder = text_encoder,
                     variant=args.variant
                 )
-                # test_in_train(pipeline, prompt_json_path, img_save_dir, args.instance_prompt, args.num_inference_steps)    
+                test_in_train(pipeline, prompt_json_path, img_save_dir, args.instance_prompt, args.num_inference_steps)
                 if args.save_checkpoint:
                     pipeline.save_pretrained(args.output_dir, safe_serialization=False)
             if global_step >= args.max_train_steps:
                 break
-    
+
 if __name__ == "__main__":
     args = parse_args()
     main(args)

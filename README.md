@@ -1,20 +1,18 @@
-# JDiffusion
+# 基于Text Inversion的风格迁移图片生成方法
 
-## Introduction
+## 简介
 
-JDiffusion is a diffusion model library for generating images or videos based on [Jittor](https://github.com/Jittor/jittor), [Jtorch](https://github.com/JITTorch/jtorch), [diffusers](https://github.com/huggingface/diffusers).
+本项目是“不玩了，走了”队伍在参与第四届计图人工智能挑战赛，赛道二-风格迁移图片生成赛题的代码实现。
 
-## Installation
-### 0. Clone JDiffusion & Prepare Env
-```bash
-git clone https://github.com/JittorRepos/JDiffusion.git
-#We recommend using conda to configure the Python environment.
-conda create -n jdiffusion python=3.9
-conda activate jdiffusion
-```
-### 1. Install Requirements
+本项目使用了文本反演结合模型微调的方法，将新的图片风格注入生成模型，并建立新的单词与新风格之间的映射，然后通过结合主体内容和风格提示的方法来生成指定内容和风格的图片。
 
-Our code is based on JTorch, a high-performance dynamically compiled deep learning framework fully compatible with the PyTorch interface, please install our version of library.
+## 运行环境
+
++ ubuntu 20.04.2 LTS
++ python >= 3.9
++ jittor >= 1.3.9
+
+## 环境安装
 
 ```bash
 pip install git+https://github.com/JittorRepos/jittor
@@ -22,27 +20,19 @@ pip install git+https://github.com/JittorRepos/jtorch
 pip install git+https://github.com/JittorRepos/diffusers_jittor
 pip install git+https://github.com/JittorRepos/transformers_jittor
 ```
-or just
+
+或者
+
 ```bash
 pip install -r requirement.txt
 ```
-### 2. Install JDiffusion
+### 2. 安装 JDiffusion
 ```bash
 cd JDiffusion
 pip install -e .
 ```
-We also provide a docker image about our environment.
 
-### 3.Optional Requirements
- If you encounter `No module named 'cupy'`:
-```bash
-# Install CuPy from source
-pip install cupy
-# Install CuPy for cuda11.2 (Recommended, change cuda version you use)
-pip install cupy-cuda112
-```
-
-## Dataset preparation
+## 数据准备
 ```
 ${ROOT}
  -- dataset
@@ -54,8 +44,8 @@ ${ROOT}
 
 ```
 
-
-## Usage
+## 训练和测试
+本项目在1张A100运行，单个风格训练时间约为8分钟
 
 ```
 ### train
@@ -65,3 +55,5 @@ sh train.sh
 sh test.sh
 
 ```
+## 联系方式
+jcwang@stu.ecnu.edu.cn

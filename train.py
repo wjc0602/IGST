@@ -1,11 +1,9 @@
 import jittor as jt
 import jittor.nn as nn
 import argparse
-import copy
 import logging
 import math
 import os
-import warnings
 import itertools
 import json
 from pathlib import Path
@@ -588,8 +586,6 @@ def main(args):
 
             # Test the model 
             if args.test and (global_step in [300] or global_step >= args.max_train_steps):
-                prompt_json_path=f'{args.instance_data_dir}/../prompt.json'
-                img_save_dir=f'{args.output_dir}'.replace('checkpoints','results').replace('style_','').replace('_e_',f'_e{global_step}_')
                 pipeline = DiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     vae = vae,
@@ -600,7 +596,7 @@ def main(args):
                 )
                 # test_in_train(pipeline, prompt_json_path, img_save_dir, args.instance_prompt, args.num_inference_steps)    
                 if args.save_checkpoint:
-                    pipeline.save_pretrained(args.output_dir,safe_serialization=False)
+                    pipeline.save_pretrained(args.output_dir, safe_serialization=False)
             if global_step >= args.max_train_steps:
                 break
     
